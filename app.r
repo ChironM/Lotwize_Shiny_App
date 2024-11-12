@@ -7,6 +7,7 @@ library(recipes)
 library(scales)
 library(shiny)
 library(RANN)
+library(shinythemes)
 
 # Read data
 setwd(dirname(rstudioapi::getSourceEditorContext()$path))
@@ -180,11 +181,15 @@ zip_choices <- c("90046", "90066", "90254", "90275", "90277", "90278", "90291",
 
 # Define UI
 ui <- fluidPage(
+  theme = shinytheme("cerulean"),  # Apply blue-themed cerulean styling
+  
   titlePanel("House Price Prediction"),
   
   sidebarLayout(
     sidebarPanel(
-      selectInput("zip_code", "Enter ZIP Code:",
+      h4("Enter Property Details"),
+      
+      selectInput("zip_code", "ZIP Code:",
                   choices = zip_choices,
                   selected = "zipcode90046"),
       
@@ -209,7 +214,7 @@ ui <- fluidPage(
       selectInput("home_type",
                   "Home Type:",
                   choices = c("CONDO", "LOT", "MANUFACTURED", 
-                            "MULTI_FAMILY", "SINGLE_FAMILY", "TOWNHOUSE"),
+                              "MULTI_FAMILY", "SINGLE_FAMILY", "TOWNHOUSE"),
                   selected = "SINGLE_FAMILY"),
       
       numericInput("lot_size",
@@ -217,18 +222,22 @@ ui <- fluidPage(
                    value = 5000,
                    min = 0),
       
-      actionButton("predict", "Predict Price")
+      actionButton("predict", "Predict Price", class = "btn-primary")
     ),
     
     mainPanel(
-      h3("Predicted House Price:"),
-      textOutput("prediction_output"),
+      h3("Predicted House Price"),
+      tags$div(style = "font-size: 1.5em; color: #0056b3;",
+               textOutput("prediction_output")),
+      
+      tags$br(),
       
       helpText("This model uses XGBoost to predict house prices based on historical data.
                The prediction is based on the features you input and local market conditions.")
     )
   )
 )
+
 
 # Define recipe for preprocessing
 prep_recipe <- recipe(price ~ ., data = train_data) %>%
