@@ -1,157 +1,24 @@
 # Load required packages
-library(tidyverse)
+library(dplyr)
+library(readr) 
+library(tidyr)
+library(purrr)
+library(tibble)
 library(caret)
-library(corrplot)
-library(xgboost)
-library(recipes)
-library(scales)
 library(shiny)
-library(RANN)
-library(shinythemes)
+library(scales)
+library(leaflet)
+library(tidygeocoder)
+library(bslib)
+library(shinyWidgets)
+library(randomForest)
 
 # Read data
 setwd(dirname(rstudioapi::getSourceEditorContext()$path))
-data <- read.csv("lotwize_case.csv")
-crime_data <- read.csv("hci_crime_752_pl_co_re_ca_2000-2013_21oct15-ada.csv")
+data <- read.csv("sampled_data.csv")
 
-# Select important features
-selected_features <- c(
-  "price", "latitude", "longitude", "schools.0.distance", # fix column names with slashes
-  "livingAreaValue", "lotSize", "bedrooms", "bathrooms",
-  "homeType", "yearBuilt", "priceHistory.0.price",
-  "taxAssessedValue", "zestimate", "lastSoldPrice",
-  "nearbyHomes.0.price", "nearbyHomes.0.lotSize",
-  "nearbyHomes.0.livingArea", "monthlyHoaFee",
-  "taxHistory.0.value", "mortgageRates.thirtyYearFixedRate",
-  "photoCount", "zipcode", "county"
-)
-
-
-data <- data[selected_features]
-
-# Identifying continuous and categorical features
-continuous_features <- c(
-  'price', 'latitude', 'longitude', 'schools.0.distance', 'livingAreaValue', 'lotSize', 
-  'priceHistory.0.price', 'taxAssessedValue', 'zestimate', 'lastSoldPrice', 'nearbyHomes.0.price', 
-  'nearbyHomes.0.lotSize', 'monthlyHoaFee', 'taxHistory.0.value', 'mortgageRates.thirtyYearFixedRate', 
-  'photoCount', 'yearBuilt', 'bedrooms', 'bathrooms'
-)
-
-categorical_features <- c('homeType', 'zipcode')
-
-# Dropping variables to fix multicollinearity
-data <- data %>%
-  select(-c('taxHistory.0.value', 'lastSoldPrice', 'priceHistory.0.price', 
-            'mortgageRates.thirtyYearFixedRate', 'zestimate', 
-            'nearbyHomes.0.price', 'taxAssessedValue', 'nearbyHomes.0.livingArea'))
-
-continuous_features <- c(
-  'price', 'latitude', 'longitude', 'schools.0.distance', 'livingAreaValue', 'lotSize', 
-  'nearbyHomes.0.lotSize', 'monthlyHoaFee',
-  'photoCount', 'yearBuilt', 'bedrooms', 'bathrooms'
-)
-
-# Merging datasets
-crime_data$county <- paste0(crime_data$county, ' County')
-crime_data <- crime_data %>% drop_na(county)
-data <- merge(data, crime_data[, c('county', 'rate')], by='county', all.x=TRUE)
-
-# Dropping county column
-data <- data %>%
-  select(-county)
-
-# Cleaning for outliers
-z_threshold <- 2
-z <- abs(scale(data[continuous_features]))
-outlier_indices <- which(z > z_threshold)
-data <- data[-outlier_indices, ]
-
-# Check for missing values in categorical features
-colSums(is.na(data[categorical_features]))
-
-# Converting categorical features to strings
-data[categorical_features] <- lapply(data[categorical_features], as.character)
-
-# Creating dummy variables
-cat_dummies <- model.matrix(~ . - 1, data = data[categorical_features])
-cat_dummies <- as.data.frame(cat_dummies)
-
-# Ensure the number of rows match before binding
-cat_dummies <- cat_dummies[1:nrow(data), ]
-
-# Dropping original categorical variables from dataset
-levels_data <- data
-data <- data %>%
-  select(-c(homeType, zipcode)) %>%
-  bind_cols(cat_dummies)
-
-# Dropping specified columns
-data <- data %>%
-  select(-c(latitude, longitude, schools.0.distance, livingAreaValue, nearbyHomes.0.lotSize, monthlyHoaFee, photoCount, rate))
-
-# Scaling data
-scaler <- preProcess(data, method = 'range')
-data <- predict(scaler, data)
-
-# Dropping specific columns
-data <- data %>%
-  select(-homeTypeHOME_TYPE_UNKNOWN)
-
-# Imputing missing values
-preImpute <- preProcess(data, method = 'knnImpute')
-data <- predict(preImpute, data)
-
-# Split data
-set.seed(42)
-train_index <- createDataPartition(data$price, p = 0.8, list = FALSE)
-train_data <- data[train_index, ]
-test_data <- data[-train_index, ]
-
-# Prepare matrices for XGBoost
-X_train <- as.matrix(train_data %>% select(-price))
-y_train <- train_data$price
-X_test <- as.matrix(test_data %>% select(-price))
-y_test <- test_data$price
-
-# Set parameters for XGBoost
-params <- list(
-  objective = "reg:squarederror",  # Regression task (for continuous target variable)
-  booster = "gbtree",              # Using tree boosting
-  eta = 0.1,                       # Learning rate
-  max_depth = 6,                   # Maximum depth of trees
-  subsample = 0.8,                 # Subsample ratio of the training set
-  colsample_bytree = 0.8           # Subsample ratio of columns when constructing each tree
-)
-
-# Train the XGBoost model
-model <- xgboost(
-  data = X_train,                 # Feature matrix for training
-  label = y_train,                # Target variable for training
-  params = params,                # Parameters for the model
-  nrounds = 100,                  # Number of boosting rounds (iterations)
-  verbose = 1                     # Show progress
-)
-
-# Calculate and print model metrics
-train_pred <- predict(model, X_train)
-test_pred <- predict(model, X_test)
-
-train_metrics <- data.frame(
-  MSE = mean((y_train - train_pred)^2),
-  MAE = mean(abs(y_train - train_pred)),
-  MAPE = mean(abs((y_train - train_pred)/y_train)) * 100,
-  R2 = cor(y_train, train_pred)^2
-)
-
-test_metrics <- data.frame(
-  MSE = mean((y_test - test_pred)^2),
-  MAE = mean(abs(y_test - test_pred)),
-  MAPE = mean(abs((y_test - test_pred)/y_test)) * 100,
-  R2 = cor(y_test, test_pred)^2
-)
-
-# Calculate feature importance
-importance_matrix <- xgb.importance(model = model)
+# Read model
+rf_model <- readRDS("rf_model.rds")
 
 zip_choices <- c("90046", "90066", "90254", "90275", "90277", "90278", "90291",
                  "90712", "90713", "90720", "90740", "90755", "90802", "90803",
@@ -177,139 +44,271 @@ zip_choices <- c("90046", "90066", "90254", "90275", "90277", "90278", "90291",
                  "94404", "94506", "94536", "94538", "94539", "94541", "94542",
                  "94544", "94545", "94555", "94563", "95003", "95010", "95014",
                  "95020", "95037", "95050", "95054", "95060", "95062", "95073",
-                 "95120", "95746")
+                 "95120", "95746", "95204", "95207", "95209", "95210", "95212", 
+                 "95219", "95242", "95336", "95376", "95746")
+
+home_type_choices <- c("CONDO", "LOT", "MANUFACTURED", 
+                       "MULTI_FAMILY", "SINGLE_FAMILY", "TOWNHOUSE")
+
+# Custom CSS
+custom_css <- "
+.card {
+  background-color: #2b2b2b;
+  border: 1px solid #3d3d3d;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.form-control {
+  background-color: #333333 !important;
+  border: 1px solid #444444 !important;
+  color: #ffffff !important;
+  border-radius: 6px !important;
+}
+
+.form-control:focus {
+  border-color: #5c7cfa !important;
+  box-shadow: 0 0 0 0.2rem rgba(92, 124, 250, 0.25) !important;
+}
+
+.btn-primary {
+  background-color: #5c7cfa !important;
+  border-color: #5c7cfa !important;
+  border-radius: 6px !important;
+  padding: 8px 16px !important;
+  font-weight: 500 !important;
+  transition: all 0.3s ease !important;
+}
+
+.btn-primary:hover {
+  background-color: #4c6ef5 !important;
+  border-color: #4c6ef5 !important;
+  transform: translateY(-1px);
+}
+
+.selectize-input {
+  background-color: #333333 !important;
+  border: 1px solid #444444 !important;
+  color: #ffffff !important;
+}
+
+.selectize-dropdown {
+  background-color: #333333 !important;
+  border: 1px solid #444444 !important;
+  color: #ffffff !important;
+}
+
+.selectize-dropdown-content .option {
+  color: #ffffff !important;
+}
+
+.selectize-dropdown-content .option.active {
+  background-color: #5c7cfa !important;
+}
+
+#prediction_output {
+  font-size: 24px;
+  font-weight: 500;
+  color: #5c7cfa;
+  padding: 15px;
+  background-color: #2b2b2b;
+  border-radius: 8px;
+  display: inline-block;
+}
+
+.leaflet-container {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.section-title {
+  color: #ffffff;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #5c7cfa;
+}
+"
 
 # Define UI
 ui <- fluidPage(
-  theme = shinytheme("cerulean"),  # Apply blue-themed cerulean styling
+  theme = bs_theme(
+    version = 5,
+    bg = "#1a1a1a",
+    fg = "#ffffff",
+    primary = "#5c7cfa",
+    secondary = "#4c6ef5",
+    success = "#51cf66",
+    info = "#339af0",
+    warning = "#fcc419",
+    danger = "#ff6b6b",
+    base_font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    heading_font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    font_scale = 0.95
+  ),
   
-  titlePanel("House Price Prediction"),
+  tags$head(
+    tags$style(custom_css),
+    tags$link(rel = "stylesheet", href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap")
+  ),
   
-  sidebarLayout(
-    sidebarPanel(
-      h4("Enter Property Details"),
-      
-      selectInput("zip_code", "ZIP Code:",
-                  choices = zip_choices,
-                  selected = "zipcode90046"),
-      
-      numericInput("bedrooms",
-                   "Number of Bedrooms:",
-                   value = 3,
-                   min = 1,
-                   max = 10),
-      
-      numericInput("bathrooms",
-                   "Number of Bathrooms:",
-                   value = 2,
-                   min = 1,
-                   max = 10),
-      
-      numericInput("year_built",
-                   "Year Built:",
-                   value = 2000,
-                   min = 1800,
-                   max = 2024),
-      
-      selectInput("home_type",
-                  "Home Type:",
-                  choices = c("CONDO", "LOT", "MANUFACTURED", 
-                              "MULTI_FAMILY", "SINGLE_FAMILY", "TOWNHOUSE"),
-                  selected = "SINGLE_FAMILY"),
-      
-      numericInput("lot_size",
-                   "Lot Size (in sq ft):",
-                   value = 5000,
-                   min = 0),
-      
-      actionButton("predict", "Predict Price", class = "btn-primary")
-    ),
-    
-    mainPanel(
-      h3("Predicted House Price"),
-      tags$div(style = "font-size: 1.5em; color: #0056b3;",
-               textOutput("prediction_output")),
-      
-      tags$br(),
-      
-      helpText("This model uses XGBoost to predict house prices based on historical data.
-               The prediction is based on the features you input and local market conditions.")
-    )
+  # Title Panel with modern styling
+  div(class = "container-fluid py-4",
+      h1("House Price Prediction", 
+         style = "color: #ffffff; font-weight: 600; margin-bottom: 30px;",
+         class = "text-center")
+  ),
+  
+  # Main Layout
+  div(class = "container-fluid",
+      fluidRow(
+        # Sidebar
+        column(4,
+               div(class = "card",
+                   h3("Input Parameters", class = "section-title"),
+                   textInput("address", "Enter Address:", 
+                           value = ""),
+                   selectInput("zip_code", "Enter ZIP Code:", 
+                             choices = zip_choices,
+                             selected = "90046"),
+                   numericInput("bedrooms", "Number of Bedrooms:", 
+                              value = 3, min = 1, max = 10),
+                   numericInput("bathrooms", "Number of Bathrooms:", 
+                              value = 2, min = 1, max = 10),
+                   numericInput("year_built", "Year Built:", 
+                              value = 2000, min = 1800, max = 2024),
+                   selectInput("home_type", "Home Type:", 
+                             choices = home_type_choices,
+                             selected = "SINGLE_FAMILY"),
+                   numericInput("lot_size", "Lot Size (in sq ft):", 
+                              value = 5000, min = 0),
+                   numericInput("rate", "Crime Rate:", 
+                              value = 5, min = 0),
+                   div(style = "margin-top: 25px;",
+                       actionButton("predict", "Predict Price", 
+                                  class = "btn-primary btn-lg w-100"))
+               )
+        ),
+        
+        # Main Panel
+        column(8,
+               div(class = "card",
+                   h3("Predicted House Price", class = "section-title"),
+                   textOutput("prediction_output")
+               ),
+               div(class = "card",
+                   h3("Property Location", class = "section-title"),
+                   leafletOutput("map", height = 400)
+               )
+        )
+      )
   )
 )
 
-
-# Define recipe for preprocessing
-prep_recipe <- recipe(price ~ ., data = train_data) %>%
-  step_dummy(all_nominal(), -all_outcomes()) %>%
-  step_range(all_numeric(), -all_outcomes()) %>%
-  step_impute_knn(all_numeric(), -all_outcomes()) %>%
-  prep(training = train_data)
-
-# First, save the column names and scaling parameters before the server function
-model_columns <- colnames(X_train)
-numeric_columns <- c('bedrooms', 'bathrooms', 'yearBuilt', 'lotSize')
-
- 
-# Define server
 server <- function(input, output, session) {
-  prediction <- eventReactive(input$predict, {
-    # Create initial data frame with numeric values
-    new_data <- data.frame(
-      bedrooms = as.numeric(input$bedrooms),
-      bathrooms = as.numeric(input$bathrooms),
-      yearBuilt = as.numeric(input$year_built),
-      lotSize = as.numeric(input$lot_size)
-    )
+  # Reactive value for storing geocoded coordinates
+  coords <- reactiveVal(NULL)
+  
+  # Observe address changes and geocode
+  observe({
+    req(input$address)
     
-    # Create dummy variables manually
-    # For zipcode
-    for(zip in zip_choices) {
-      col_name <- paste0("zipcode", zip)
-      new_data[[col_name]] <- as.numeric(input$zip_code == paste0("zipcode", zip))
+    # Geocode the address
+    if (nchar(input$address) > 0) {
+      tryCatch({
+        # Combine address with ZIP code for better accuracy
+        full_address <- paste(input$address, input$zip_code)
+        
+        # Geocode the address using tidygeocoder
+        geo_result <- geo(address = full_address, method = "osm")
+        
+        if (!is.na(geo_result$lat) && !is.na(geo_result$long)) {
+          coords(list(lat = geo_result$lat, lng = geo_result$long))
+        }
+      }, error = function(e) {
+        # Handle geocoding errors silently
+        coords(NULL)
+      })
     }
-    
-    # For homeType
-    home_types <- c("APARTMENT", "CONDO", "LOT", "MANUFACTURED", 
-                    "MULTI_FAMILY", "SINGLE_FAMILY", "TOWNHOUSE")
-    for(type in home_types) {
-      col_name <- paste0("homeType", type)
-      new_data[[col_name]] <- as.numeric(input$home_type == type)
-    }
-    
-    # Scale the numeric columns using the original scaling parameters
-    for(col in numeric_columns) {
-      new_data[[col]] <- (new_data[[col]] - min(train_data[[col]])) / 
-        (max(train_data[[col]]) - min(train_data[[col]]))
-    }
-    
-    # Ensure all columns from the training data are present and in the right order
-    missing_cols <- setdiff(model_columns, colnames(new_data))
-    for(col in missing_cols) {
-      new_data[[col]] <- 0
-    }
-    
-    # Reorder columns to match training data exactly
-    new_data <- new_data[, model_columns]
-    
-    # Make prediction
-    prediction <- predict(model, as.matrix(new_data))
-    
-    # Unscale the prediction using the original price range
-    price_range <- max(train_data$price) - min(train_data$price)
-    price_min <- min(train_data$price)
-    unscaled_prediction <- prediction * price_range + price_min
-    
-    return(unscaled_prediction)
   })
   
-  # Render the prediction
-  output$prediction_output <- renderText({
+  # Create reactive prediction function
+  prediction <- eventReactive(input$predict, {
+    # Create new data frame for prediction
+    new_data <- data.frame(
+      lotSize = input$lot_size,
+      bedrooms = input$bedrooms,
+      bathrooms = input$bathrooms,
+      yearBuilt = input$year_built,
+      rate = input$rate
+    )
+    
+    # Add home type dummy variables
+    for (type in home_type_choices) {
+      col_name <- paste0("homeType_", type)
+      new_data[[col_name]] <- ifelse(input$home_type == type, 1, 0)
+    }
+    
+    # Add zipcode dummy variables
+    for (zip in zip_choices) {
+      col_name <- paste0("zipcode_", zip)
+      new_data[[col_name]] <- ifelse(input$zip_code == zip, 1, 0)
+    }
+    
+    # Make prediction
     tryCatch({
-      req(prediction())
-      formatted_price <- dollar_format()(prediction())
-      paste("Predicted Price:", formatted_price)
+      pred <- predict(rf_model, newdata = new_data)
+      return(pred)
+    }, error = function(e) {
+      return(NA)
     })
+  })
+  
+  # Render the prediction output with formatting
+  output$prediction_output <- renderText({
+    pred <- prediction()
+    if (is.na(pred)) {
+      return("Unable to make prediction")
+    } else {
+      formatted_price <- scales::dollar_format()(pred)
+      return(paste(formatted_price))
+    }
+  })
+  
+  # Initialize the map with light theme
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%  # Light theme map tiles
+      setView(lng = -118.2437, lat = 34.0522, zoom = 10) %>%  # Default to LA coordinates
+      # Custom styling for the map
+      htmlwidgets::onRender("
+        function(el, x) {
+          var map = this;
+          map.getContainer().style.background = '#ffffff';
+          map.getContainer().style.border = '1px solid #3d3d3d';
+        }
+      ")
+  })
+  
+  # Update map when coordinates change with custom marker
+  observe({
+    coordinate_data <- coords()
+    
+    if (!is.null(coordinate_data)) {
+      leafletProxy("map") %>%
+        clearMarkers() %>%
+        setView(lng = coordinate_data$lng, 
+                lat = coordinate_data$lat, 
+                zoom = 15) %>%
+        addMarkers(lng = coordinate_data$lng, 
+                   lat = coordinate_data$lat,
+                   popup = input$address,
+                   options = markerOptions(
+                     riseOnHover = TRUE
+                   ))
+    }
   })
 }
 
