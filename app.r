@@ -14,7 +14,6 @@ library(shinyWidgets)
 library(randomForest)
 
 # Read data
-setwd(dirname(rstudioapi::getSourceEditorContext()$path))
 data <- read.csv("sampled_data.csv")
 
 # Read model
